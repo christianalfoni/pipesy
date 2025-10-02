@@ -1,0 +1,28 @@
+{
+  "name": "pipesy",
+  "version": "1.0.0",
+  "description": "**Elegant state management meets composable async operations**",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianalfoni/pipesy.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/christianalfoni/pipesy/issues"
+  },
+  "homepage": "https://github.com/christianalfoni/pipesy#readme",
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "react": "^19.2.0"
+  }
+}
