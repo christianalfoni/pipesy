@@ -54,10 +54,10 @@ type PipeBuilder<Input, State, Current> = {
   updateState<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current>;
 
   /** React hook that returns the current state and a function to trigger the pipe */
-  use(initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void];
+  use(initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void];
 
   /** React hook that shares state globally via cache key */
-  useCache(cacheKey: string, initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void];
+  useCache(cacheKey: string, initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void];
 };
 
 function createPipeFunction<T>(operators: Operator<any, any>[], context: PipeContext) {
@@ -385,12 +385,12 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, NewState, Current>([...operators, updateOperator]);
     },
 
-    use(initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void] {
-      return useWithoutCache<Input, State, Current>(operators, initialState);
+    use(initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void] {
+      return useWithoutCache<Input, State, Current>(operators, initialValue, subscribe);
     },
 
-    useCache(cacheKey: string, initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void] {
-      return useWithCache<Input, State, Current>(operators, initialState, cacheKey);
+    useCache(cacheKey: string, initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void] {
+      return useWithCache<Input, State, Current>(operators, cacheKey, initialValue, subscribe);
     },
   };
 
@@ -399,11 +399,11 @@ function createPipeBuilder<Input, State, Current = Input>(
 
 function useWithoutCache<Input, State, Current>(
   operators: Operator<any, any>[],
-  initialState: State | ((run: (value: Input) => void) => void | (() => void))
+  initialValue: State,
+  subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)
 ): readonly [State, (value: Input) => void] {
   const isMountedRef = useRef(true);
-  const isFunction = typeof initialState === 'function';
-  const stateRef = useRef<State>(isFunction ? undefined as any : initialState);
+  const stateRef = useRef<State>(initialValue);
   const listenersRef = useRef<Set<() => void>>(new Set());
   const runRef = useRef<(value: Input) => void>();
 
@@ -431,7 +431,7 @@ function useWithoutCache<Input, State, Current>(
     runRef.current = run;
   }
 
-  const subscribe = useCallback((listener: () => void) => {
+  const subscribeToStore = useCallback((listener: () => void) => {
     listenersRef.current.add(listener);
     return () => {
       listenersRef.current.delete(listener);
@@ -442,14 +442,14 @@ function useWithoutCache<Input, State, Current>(
     return stateRef.current;
   }, []);
 
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const state = useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 
   useEffect(() => {
     isMountedRef.current = true;
 
     let unsubscribe: (() => void) | void;
-    if (isFunction && runRef.current) {
-      unsubscribe = (initialState as (run: (value: Input) => void) => void | (() => void))(runRef.current);
+    if (subscribe && runRef.current) {
+      unsubscribe = subscribe(runRef.current, stateRef.current);
     }
 
     return () => {
@@ -465,8 +465,9 @@ function useWithoutCache<Input, State, Current>(
 
 function useWithCache<Input, State, Current>(
   operators: Operator<any, any>[],
-  initialState: State | ((run: (value: Input) => void) => void | (() => void)),
-  cacheKey: string
+  cacheKey: string,
+  initialValue: State,
+  subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)
 ): readonly [State, (value: Input) => void] {
   const cache = useContext(CacheContext);
 
@@ -475,13 +476,13 @@ function useWithCache<Input, State, Current>(
   }
 
   const isMountedRef = useRef(true);
-  const isFunction = typeof initialState === 'function';
   const runRef = useRef<(value: Input) => void>();
+  const initialValueRef = useRef<State>(initialValue);
 
   if (!runRef.current) {
     const context: PipeContext = {
       get currentState() {
-        return cache.get<State>(cacheKey) ?? (isFunction ? undefined : initialState);
+        return cache.get<State>(cacheKey) ?? initialValueRef.current;
       },
       set currentState(value: any) {
         cache.set(cacheKey, value);
@@ -501,26 +502,26 @@ function useWithCache<Input, State, Current>(
     runRef.current = run;
   }
 
-  const subscribe = useCallback((listener: () => void) => {
+  const subscribeToStore = useCallback((listener: () => void) => {
     return cache.subscribe<State>(cacheKey, listener);
   }, [cacheKey]);
 
   const getSnapshot = useCallback(() => {
-    return cache.get<State>(cacheKey) ?? (isFunction ? undefined as any : initialState);
+    return cache.get<State>(cacheKey) ?? initialValueRef.current;
   }, [cacheKey]);
 
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const state = useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (isFunction && runRef.current) {
-      cache.addSubscription(cacheKey, () => (initialState as (run: (value: Input) => void) => void | (() => void))(runRef.current!));
+    if (subscribe && runRef.current) {
+      cache.addSubscription(cacheKey, () => subscribe(runRef.current!, initialValueRef.current));
     }
 
     return () => {
       isMountedRef.current = false;
-      if (isFunction) {
+      if (subscribe) {
         cache.removeSubscription(cacheKey);
       }
     };
