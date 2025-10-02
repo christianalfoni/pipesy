@@ -1,8 +1,8 @@
-# 🔄 React Pipeline
+# 🔄 Pipesy
 
 **Elegant state management meets composable async operations**
 
-React Pipeline is a powerful library for building reactive data flows in React. Chain operators together to handle everything from simple state updates to complex async workflows with retries, queues, and error handling.
+Pipesy is a powerful library for building reactive data flows in React. Chain operators together to handle everything from simple state updates to complex async workflows with retries, queues, and error handling.
 
 ## ✨ Features
 
@@ -17,17 +17,17 @@ React Pipeline is a powerful library for building reactive data flows in React. 
 ## 📦 Installation
 
 ```bash
-npm install react-pipeline
+npm install pipesy
 ```
 
 ## 🚀 Quick Start
 
 ```tsx
-import { pipe } from "react-pipeline";
+import { pipe } from "pipesy";
 
 function Counter() {
   const [count, increment] = pipe()
-    .update((state, value) => state + value)
+    .updateState((state, value) => state + value)
     .useState(0);
 
   return <button onClick={() => increment(1)}>Count: {count}</button>;
@@ -46,7 +46,7 @@ function NameInput() {
     .map((event) => event.target.value)
     .map((value) => value.trim())
     .map((value) => value.toUpperCase())
-    .set()
+    .setState()
     .useState("");
 
   return (
@@ -68,7 +68,7 @@ function AgeInput() {
     .map((event) => event.target.value)
     .map((value) => parseInt(value))
     .filter((value) => !isNaN(value) && value >= 0 && value <= 120)
-    .set()
+    .setState()
     .useState(0);
 
   return (
@@ -87,16 +87,21 @@ Delay execution until user stops typing:
 ```tsx
 function SearchBox() {
   const [query, onQueryChange] = pipe()
-    .debounce(500)
     .map((event) => event.target.value)
+    .updateState((state, value) => ({ ...state, input: value }))
+    .debounce(500)
     .map((value) => value.trim())
     .filter((value) => value.length >= 3)
-    .set()
-    .useState("");
+    .updateState((state, value) => ({ ...state, query: value }))
+    .useState({ input: "", query: "" });
 
   return (
     <div>
-      <input onChange={onQueryChange} placeholder="Search..." />
+      <input
+        onChange={onQueryChange}
+        value={query.input}
+        placeholder="Search..."
+      />
       <p>Searching for: {query}</p>
     </div>
   );
@@ -110,14 +115,14 @@ Handle async operations seamlessly:
 ```tsx
 function UserProfile() {
   const [user, fetchUser] = pipe()
-    .set({ status: "loading", data: null })
+    .setState({ status: "loading", data: null })
     .async(async (userId) => {
       const response = await fetch(`/api/users/${userId}`);
       const data = await response.json();
 
       return { status: "success", data };
     })
-    .set()
+    .setState()
     .useState({ status: "idle", data: null });
 
   return (
@@ -137,7 +142,7 @@ Gracefully handle errors in your pipeline:
 ```tsx
 function ResilientFetcher() {
   const [result, fetch] = pipe()
-    .set({ loading: true, data: null, error: null })
+    .setState({ loading: true, data: null, error: null })
     .async(async (state, url) => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -150,7 +155,7 @@ function ResilientFetcher() {
       data: null,
       error: error.message,
     }))
-    .set()
+    .setState()
     .useState({ loading: false, data: null, error: null });
 
   return (
@@ -171,7 +176,7 @@ Automatically retry failed requests:
 ```tsx
 function ReliableDataFetcher() {
   const [data, fetchData] = pipe()
-    .set({ loading: true, data: null, error: null })
+    .setState({ loading: true, data: null, error: null })
     .asyncRetry(
       async (state, url) => {
         const res = await fetch(url);
@@ -188,7 +193,7 @@ function ReliableDataFetcher() {
       data: null,
       error: "Failed after 3 retries",
     }))
-    .set()
+    .setState()
     .useState({ loading: false, data: null, error: null });
 
   return (
@@ -211,7 +216,7 @@ Process multiple requests in order:
 ```tsx
 function BatchEmailSender() {
   const [status, sendEmail] = pipe()
-    .update((state, email) => ({
+    .updateState((state, email) => ({
       ...state,
       queue [...state.queue, email],
     }))
@@ -226,7 +231,7 @@ function BatchEmailSender() {
         queue: state.queue.slice(1),
       };
     })
-    .set()
+    .setState()
     .useState({ sent: [], queue: [], total: 0 });
 
   return (
@@ -264,7 +269,7 @@ function AutocompleteSearch() {
       const res = await fetch(`/api/autocomplete?q=${query}`);
       return await res.json();
     })
-    .set()
+    .setState()
     .useState([]);
 
   return (
@@ -289,7 +294,7 @@ function MouseTracker() {
   const [position, onMouseMove] = pipe()
     .throttle(100) // Update at most every 100ms
     .map((event) => ({ x: event.clientX, y: event.clientY }));
-    .set()
+    .setState()
     .useState({ x: 0, y: 0 });
 
   useEffect(() => {
@@ -312,14 +317,14 @@ Subscribe to external data sources like WebSockets:
 ```tsx
 function LiveNotifications() {
   const [notifications, addNotification] = pipe()
-    .update((state, notification) => [...state, notification])
-    .useSubscription((update) => {
+    .updateState((state, notification) => [...state, notification])
+    .useSubscription((addNotification) => {
       // Subscribe function
       const ws = new WebSocket("wss://api.example.com/notifications");
 
       ws.onmessage = (event) => {
         const notification = JSON.parse(event.data);
-        update(notification);
+        addNotification(notification);
       };
 
       // Cleanup function (called on unmount)
@@ -346,7 +351,7 @@ function LiveNotifications() {
 Share state across multiple components:
 
 ```tsx
-import { pipe, CacheProvider } from "react-pipeline";
+import { pipe, CacheProvider } from "pipesy";
 
 function App() {
   return (
@@ -357,24 +362,33 @@ function App() {
   );
 }
 
+function useCurrentUser() {
+  const [user] pipe()
+    .setState()
+    .useSubcription(
+      (call) => {
+        fetch(`/api/users/me`)
+          .then((res) => res.json())
+          .then(call);
+
+        return () => {
+          // Abort fetch
+        };
+      },
+      null,
+      "current-user"
+    ); // Shared cache key + initial value
+
+  return user
+}
+
 function UserProfile() {
-  const [user, setUser] = pipe()
-    .async(async (state, userId) => {
-      const res = await fetch(`/api/users/${userId}`);
-      return await res.json();
-    })
-    .set()
-    .useState(null, "current-user"); // Shared cache key + initial value
-
-  useEffect(() => {
-    setUser("user-123");
-  }, []);
-
+  const user = useCurrentUser();
   return <div>{user ? `Welcome, ${user.name}!` : "Loading..."}</div>;
 }
 
 function UserSettings() {
-  const [user] = pipe().useCache("current-user", null); // Same cache key - shares state!
+  const user = useCurrentUser();
 
   return (
     <div>
@@ -396,12 +410,12 @@ Build sophisticated state machines with clear transitions:
 ```tsx
 function FileUploader() {
   const [upload, triggerUpload] = pipe()
-    .map((state, file) => {
+    .map((file, state) => {
       if (state.status === "uploading") return state; // Prevent double upload
       return { status: "uploading", progress: 0, url: null, error: null };
     })
-    .set()
-    .async(async (state, file) => {
+    .setState()
+    .async(async (file) => {
       const formData = new FormData();
       formData.append("file", file);
 
@@ -413,20 +427,20 @@ function FileUploader() {
       if (!res.ok) throw new Error("Upload failed");
       return await res.json();
     })
-    .map((state, result) => ({
+    .map((result) => ({
       status: "success",
       progress: 100,
       url: result.url,
       error: null,
     }))
-    .set()
+    .setState()
     .catch((state, error) => ({
       status: "error",
       progress: 0,
       url: null,
       error: error.message,
     }))
-    .set()
+    .setState()
     .use({
       status: "idle",
       progress: 0,
@@ -510,7 +524,7 @@ Delay execution by `ms` milliseconds.
 
 ### State Operators
 
-#### `.set(value?)`
+#### `.setState(value?)`
 
 Update state with the current value, a static value, or a function.
 
@@ -518,7 +532,7 @@ Update state with the current value, a static value, or a function.
 - Value: Set state to this value
 - Function: Transform current value before setting state
 
-#### `.update(fn: (state, value) => newState)`
+#### `.updateState(fn: (state, value) => newState)`
 
 Update state based on both current state and the value.
 
@@ -550,14 +564,14 @@ Like `.use()` but shares state globally via cache key.
 ```tsx
 const [data, fetch] = pipe()
   .map((state, url) => ({ ...state, loading: true, error: null }))
-  .set()
+  .setState()
   .async(async (state, url) => {
     /* fetch */
   })
   .map((state, result) => ({ loading: false, data: result, error: null }))
-  .set()
+  .setState()
   .catch((state, error) => ({ ...state, loading: false, error }))
-  .set()
+  .setState()
   .use({ loading: false, data: null, error: null });
 ```
 
@@ -565,7 +579,7 @@ const [data, fetch] = pipe()
 
 ```tsx
 const [todos, updateTodo] = pipe()
-  .update((state, todo) =>
+  .updateState((state, todo) =>
     state.map((t) => (t.id === todo.id ? { ...t, ...todo } : t))
   )
   .asyncLast(async (state, todo) => {
@@ -591,7 +605,7 @@ const [data, request] = pipe()
     const result = await fetch(`/api/data/${requestId}`);
     return { data: await result.json(), requestId };
   })
-  .set()
+  .setState()
   .use({ data: null, requestId: null });
 ```
 
@@ -600,7 +614,7 @@ const [data, request] = pipe()
 Access the cache directly:
 
 ```tsx
-import { useCache } from "react-pipeline";
+import { useCache } from "pipesy";
 
 function Component() {
   const cache = useCache();

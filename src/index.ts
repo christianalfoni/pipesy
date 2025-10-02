@@ -48,16 +48,16 @@ type PipeBuilder<Input, State, Current> = {
   delay(ms: number): PipeBuilder<Input, State, Current>;
 
   /** Sets the state to a new value, either directly or using a function of the current value */
-  set<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current>;
+  setState<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current>;
 
   /** Updates the state using a function of the current state and value */
-  update<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current>;
+  updateState<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current>;
 
   /** React hook that returns the current state and a function to trigger the pipe */
-  useState(initialState: State, cacheKey?: string): readonly [State, (value: Input) => void];
+  use(initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void];
 
-  /** React hook that subscribes to external events and returns state and a function to trigger the pipe */
-  useSubscription(subscription: (update: (value: Input) => void) => (() => void) | void, initialState: State, cacheKey?: string): readonly [State, (value: Input) => void];
+  /** React hook that shares state globally via cache key */
+  useCache(cacheKey: string, initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void];
 };
 
 function createPipeFunction<T>(operators: Operator<any, any>[], context: PipeContext) {
@@ -342,7 +342,7 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, State, Current>([...operators, delayOperator]);
     },
 
-    set<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current> {
+    setState<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current> {
       const setOperator: Operator<any, any> = function (err, val, next) {
         if (err) {
           next(err);
@@ -366,7 +366,7 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, NewState, Current>([...operators, setOperator]);
     },
 
-    update<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current> {
+    updateState<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current> {
       const updateOperator: Operator<any, any> = function (err, value, next) {
         if (err) {
           next(err);
@@ -385,144 +385,25 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, NewState, Current>([...operators, updateOperator]);
     },
 
-    useState(initialState: State, cacheKey?: string): readonly [State, (value: Input) => void] {
-      if (cacheKey) {
-        return useStateWithCache<Input, State, Current>(operators, initialState, cacheKey);
-      }
-      return useStateWithoutCache<Input, State, Current>(operators, initialState);
+    use(initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void] {
+      return useWithoutCache<Input, State, Current>(operators, initialState);
     },
 
-    useSubscription(subscription: (update: (value: Input) => void) => (() => void) | void, initialState: State, cacheKey?: string): readonly [State, (value: Input) => void] {
-      if (cacheKey) {
-        return useSubscriptionWithCache<Input, State, Current>(operators, subscription, initialState, cacheKey);
-      }
-      return useSubscriptionWithoutCache<Input, State, Current>(operators, subscription, initialState);
+    useCache(cacheKey: string, initialState: State | ((run: (value: Input) => void) => void | (() => void))): readonly [State, (value: Input) => void] {
+      return useWithCache<Input, State, Current>(operators, initialState, cacheKey);
     },
   };
 
   return basePipe as PipeBuilder<Input, State, Current>;
 }
 
-function useStateWithoutCache<Input, State, Current>(
+function useWithoutCache<Input, State, Current>(
   operators: Operator<any, any>[],
-  initialState: State
+  initialState: State | ((run: (value: Input) => void) => void | (() => void))
 ): readonly [State, (value: Input) => void] {
   const isMountedRef = useRef(true);
-  const stateRef = useRef<State>(initialState);
-  const listenersRef = useRef<Set<() => void>>(new Set());
-  const runRef = useRef<(value: Input) => void>();
-
-  if (!runRef.current) {
-    const context: PipeContext = {
-      get currentState() {
-        return stateRef.current;
-      },
-      set currentState(value: any) {
-        stateRef.current = value;
-      },
-      setState: (value: any) => {
-        stateRef.current = value;
-        listenersRef.current.forEach(listener => listener());
-      },
-      isMounted: () => isMountedRef.current,
-    };
-
-    const pipeFn = createPipeFunction<Input>(operators, context);
-
-    const run = (value: Input) => {
-      if (!isMountedRef.current) return;
-      pipeFn(value);
-    };
-    runRef.current = run;
-  }
-
-  const subscribe = useCallback((listener: () => void) => {
-    listenersRef.current.add(listener);
-    return () => {
-      listenersRef.current.delete(listener);
-    };
-  }, []);
-
-  const getSnapshot = useCallback(() => {
-    return stateRef.current;
-  }, []);
-
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  return [state, runRef.current!];
-}
-
-function useStateWithCache<Input, State, Current>(
-  operators: Operator<any, any>[],
-  initialState: State,
-  cacheKey: string
-): readonly [State, (value: Input) => void] {
-  const cache = useContext(CacheContext);
-
-  if (!cache) {
-    throw new Error('useState with cacheKey must be used within a CacheProvider');
-  }
-
-  const isMountedRef = useRef(true);
-  const runRef = useRef<(value: Input) => void>();
-
-  if (!runRef.current) {
-    const context: PipeContext = {
-      get currentState() {
-        return cache.get<State>(cacheKey) ?? initialState;
-      },
-      set currentState(value: any) {
-        cache.set(cacheKey, value);
-      },
-      setState: (value: any) => {
-        cache.set(cacheKey, value);
-      },
-      isMounted: () => isMountedRef.current,
-    };
-
-    const pipeFn = createPipeFunction<Input>(operators, context);
-
-    const run = (value: Input) => {
-      if (!isMountedRef.current) return;
-      pipeFn(value);
-    };
-    runRef.current = run;
-  }
-
-  const subscribe = useCallback((listener: () => void) => {
-    return cache.subscribe<State>(cacheKey, listener);
-  }, [cacheKey]);
-
-  const getSnapshot = useCallback(() => {
-    return cache.get<State>(cacheKey) ?? initialState;
-  }, [cacheKey]);
-
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, [cacheKey]);
-
-  return [state, runRef.current!];
-}
-
-function useSubscriptionWithoutCache<Input, State, Current>(
-  operators: Operator<any, any>[],
-  subscription: (update: (value: Input) => void) => (() => void) | void,
-  initialState: State
-): readonly [State, (value: Input) => void] {
-  const isMountedRef = useRef(true);
-  const stateRef = useRef<State>(initialState);
+  const isFunction = typeof initialState === 'function';
+  const stateRef = useRef<State>(isFunction ? undefined as any : initialState);
   const listenersRef = useRef<Set<() => void>>(new Set());
   const runRef = useRef<(value: Input) => void>();
 
@@ -567,8 +448,8 @@ function useSubscriptionWithoutCache<Input, State, Current>(
     isMountedRef.current = true;
 
     let unsubscribe: (() => void) | void;
-    if (subscription && runRef.current) {
-      unsubscribe = subscription(runRef.current);
+    if (isFunction && runRef.current) {
+      unsubscribe = (initialState as (run: (value: Input) => void) => void | (() => void))(runRef.current);
     }
 
     return () => {
@@ -582,25 +463,25 @@ function useSubscriptionWithoutCache<Input, State, Current>(
   return [state, runRef.current!];
 }
 
-function useSubscriptionWithCache<Input, State, Current>(
+function useWithCache<Input, State, Current>(
   operators: Operator<any, any>[],
-  subscription: (update: (value: Input) => void) => (() => void) | void,
-  initialState: State,
+  initialState: State | ((run: (value: Input) => void) => void | (() => void)),
   cacheKey: string
 ): readonly [State, (value: Input) => void] {
   const cache = useContext(CacheContext);
 
   if (!cache) {
-    throw new Error('useSubscription with cacheKey must be used within a CacheProvider');
+    throw new Error('useCache must be used within a CacheProvider');
   }
 
   const isMountedRef = useRef(true);
+  const isFunction = typeof initialState === 'function';
   const runRef = useRef<(value: Input) => void>();
 
   if (!runRef.current) {
     const context: PipeContext = {
       get currentState() {
-        return cache.get<State>(cacheKey) ?? initialState;
+        return cache.get<State>(cacheKey) ?? (isFunction ? undefined : initialState);
       },
       set currentState(value: any) {
         cache.set(cacheKey, value);
@@ -625,7 +506,7 @@ function useSubscriptionWithCache<Input, State, Current>(
   }, [cacheKey]);
 
   const getSnapshot = useCallback(() => {
-    return cache.get<State>(cacheKey) ?? initialState;
+    return cache.get<State>(cacheKey) ?? (isFunction ? undefined as any : initialState);
   }, [cacheKey]);
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
@@ -633,13 +514,13 @@ function useSubscriptionWithCache<Input, State, Current>(
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (subscription && runRef.current) {
-      cache.addSubscription(cacheKey, () => subscription(runRef.current!));
+    if (isFunction && runRef.current) {
+      cache.addSubscription(cacheKey, () => (initialState as (run: (value: Input) => void) => void | (() => void))(runRef.current!));
     }
 
     return () => {
       isMountedRef.current = false;
-      if (subscription) {
+      if (isFunction) {
         cache.removeSubscription(cacheKey);
       }
     };
