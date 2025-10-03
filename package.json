@@ -1,19 +1,38 @@
 {
   "name": "pipesy",
-  "version": "1.0.0",
-  "description": "**Elegant state management meets composable async operations**",
-  "main": "index.js",
+  "version": "0.0.1",
+  "description": "Elegant state management meets composable async operations",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/christianalfoni/pipesy.git"
   },
-  "keywords": [],
+  "keywords": [
+    "react",
+    "state-management",
+    "async",
+    "pipe",
+    "composable",
+    "hooks"
+  ],
   "author": "",
   "license": "MIT",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/christianalfoni/pipesy/issues"
   },
@@ -22,7 +41,9 @@
     "react": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/node": "^24.6.2",
     "@types/react": "^19.2.0",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "typescript": "^5.9.3"
   }
 }

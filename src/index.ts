@@ -405,7 +405,7 @@ function useWithoutCache<Input, State, Current>(
   const isMountedRef = useRef(true);
   const stateRef = useRef<State>(initialValue);
   const listenersRef = useRef<Set<() => void>>(new Set());
-  const runRef = useRef<(value: Input) => void>();
+  const runRef = useRef<(value: Input) => void | undefined>(undefined);
 
   if (!runRef.current) {
     const context: PipeContext = {
@@ -476,7 +476,7 @@ function useWithCache<Input, State, Current>(
   }
 
   const isMountedRef = useRef(true);
-  const runRef = useRef<(value: Input) => void>();
+  const runRef = useRef<(value: Input) => void | undefined>(undefined);
   const initialValueRef = useRef<State>(initialValue);
 
   if (!runRef.current) {
@@ -640,7 +640,7 @@ type CacheProviderProps = {
 };
 
 export function CacheProvider({ children }: CacheProviderProps) {
-  const storeRef = useRef<CacheStore>();
+  const storeRef = useRef<CacheStore | undefined>(undefined);
 
   if (!storeRef.current) {
     storeRef.current = createCacheStore();
