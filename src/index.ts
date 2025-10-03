@@ -1,4 +1,13 @@
-import { useCallback, useRef, useEffect, createContext, useContext, ReactNode, useSyncExternalStore, createElement } from "react";
+import {
+  useCallback,
+  useRef,
+  useEffect,
+  createContext,
+  useContext,
+  ReactNode,
+  useSyncExternalStore,
+  createElement,
+} from "react";
 
 type PipeContext = {
   currentState?: any;
@@ -15,28 +24,46 @@ type Operator<Input, Output> = (
 
 type PipeBuilder<Input, State, Current> = {
   /** Synchronously transforms the current value to a new value */
-  map<U>(operation: (value: Current, state: State) => U): PipeBuilder<Input, State, U>;
+  map<U>(
+    operation: (value: Current, state: State) => U
+  ): PipeBuilder<Input, State, U>;
 
   /** Asynchronously transforms the current value to a new value */
-  async<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U>;
+  async<U>(
+    operation: (value: Current, state: State) => Promise<U>
+  ): PipeBuilder<Input, State, U>;
 
   /** Asynchronously transforms the current value with retry logic. Retries on failure with optional exponential backoff */
-  asyncRetry<U>(operation: (value: Current, state: State) => Promise<U>, retries: number, backoff?: number | ((attemptNumber: number) => number)): PipeBuilder<Input, State, U>;
+  asyncRetry<U>(
+    operation: (value: Current, state: State) => Promise<U>,
+    retries: number,
+    backoff?: number | ((attemptNumber: number) => number)
+  ): PipeBuilder<Input, State, U>;
 
   /** Queues async operations to ensure they execute sequentially in order */
-  asyncQueue<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U>;
+  asyncQueue<U>(
+    operation: (value: Current, state: State) => Promise<U>
+  ): PipeBuilder<Input, State, U>;
 
   /** Only processes the most recent value, discarding earlier pending operations */
-  asyncLast<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U>;
+  asyncLast<U>(
+    operation: (value: Current, state: State) => Promise<U>
+  ): PipeBuilder<Input, State, U>;
 
   /** Ignores new values while an async operation is already in progress */
-  asyncFirst<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U>;
+  asyncFirst<U>(
+    operation: (value: Current, state: State) => Promise<U>
+  ): PipeBuilder<Input, State, U>;
 
   /** Catches errors in the pipe and transforms them to a value, allowing the pipe to continue */
-  catch<U>(operation: (err: Error, state: State) => U): PipeBuilder<Input, State, Current | U>;
+  catch<U>(
+    operation: (err: Error, state: State) => U
+  ): PipeBuilder<Input, State, Current | U>;
 
   /** Filters values, only passing through those that match the predicate */
-  filter(operation: (value: Current, state: State) => boolean): PipeBuilder<Input, State, Current>;
+  filter(
+    operation: (value: Current, state: State) => boolean
+  ): PipeBuilder<Input, State, Current>;
 
   /** Debounces the value, waiting for the specified milliseconds of inactivity before proceeding */
   debounce(ms: number): PipeBuilder<Input, State, Current>;
@@ -48,19 +75,39 @@ type PipeBuilder<Input, State, Current> = {
   delay(ms: number): PipeBuilder<Input, State, Current>;
 
   /** Sets the state to a new value, either directly or using a function of the current value */
-  setState<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current>;
+  setState<NewState = State>(
+    value?: NewState | ((value: Current) => NewState)
+  ): PipeBuilder<Input, NewState, Current>;
 
   /** Updates the state using a function of the current state and value */
-  updateState<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current>;
+  updateState<NewState = State>(
+    operation: (state: State, value: Current) => NewState
+  ): PipeBuilder<Input, NewState, Current>;
 
   /** React hook that returns the current state and a function to trigger the pipe */
-  use(initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void];
+  use(
+    initialValue: State,
+    subscribe?: (
+      run: (value: Input) => void,
+      initialValue: State
+    ) => void | (() => void)
+  ): readonly [State, (value: Input) => void];
 
   /** React hook that shares state globally via cache key */
-  useCache(cacheKey: string, initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void];
+  useCache(
+    cacheKey: string,
+    initialValue: State,
+    subscribe?: (
+      run: (value: Input) => void,
+      initialValue: State
+    ) => void | (() => void)
+  ): readonly [State, (value: Input) => void];
 };
 
-function createPipeFunction<T>(operators: Operator<any, any>[], context: PipeContext) {
+function createPipeFunction<T>(
+  operators: Operator<any, any>[],
+  context: PipeContext
+) {
   const run = (value: T) => {
     const executeOperators = (
       ops: Operator<any, any>[],
@@ -79,11 +126,16 @@ function createPipeFunction<T>(operators: Operator<any, any>[], context: PipeCon
       const operatorWithContext = operator as any;
       operatorWithContext.context = context;
 
-      operator(err, currentValue, (nextErr, nextValue) => {
-        executeOperators(ops, nextErr, nextValue, index + 1);
-      }, (completeErr, completeValue) => {
-        // complete callback - stop execution
-      });
+      operator(
+        err,
+        currentValue,
+        (nextErr, nextValue) => {
+          executeOperators(ops, nextErr, nextValue, index + 1);
+        },
+        (completeErr, completeValue) => {
+          // complete callback - stop execution
+        }
+      );
     };
 
     executeOperators(operators, null, value, 0);
@@ -96,7 +148,9 @@ function createPipeBuilder<Input, State, Current = Input>(
   operators: Operator<any, any>[]
 ): PipeBuilder<Input, State, Current> {
   const basePipe = {
-    map<U>(operation: (value: Current, state: State) => U): PipeBuilder<Input, State, U> {
+    map<U>(
+      operation: (value: Current, state: State) => U
+    ): PipeBuilder<Input, State, U> {
       const mapOperator: Operator<any, any> = (err, value, next) => {
         if (err) next(err);
         else {
@@ -107,7 +161,9 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, State, U>([...operators, mapOperator]);
     },
 
-    async<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U> {
+    async<U>(
+      operation: (value: Current, state: State) => Promise<U>
+    ): PipeBuilder<Input, State, U> {
       const asyncOperator: Operator<any, any> = (err, value, next) => {
         if (err) {
           next(err);
@@ -135,7 +191,9 @@ function createPipeBuilder<Input, State, Current = Input>(
           next(err);
         } else {
           const ctx = (retryOperator as any).context as PipeContext;
-          const attemptOperation = async (attemptNumber: number): Promise<U> => {
+          const attemptOperation = async (
+            attemptNumber: number
+          ): Promise<U> => {
             try {
               return await operation(value, ctx.currentState);
             } catch (error) {
@@ -144,8 +202,11 @@ function createPipeBuilder<Input, State, Current = Input>(
               }
 
               if (backoff !== undefined) {
-                const delayMs = typeof backoff === 'function' ? backoff(attemptNumber + 1) : backoff;
-                await new Promise(resolve => setTimeout(resolve, delayMs));
+                const delayMs =
+                  typeof backoff === "function"
+                    ? backoff(attemptNumber + 1)
+                    : backoff;
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
               }
 
               return attemptOperation(attemptNumber + 1);
@@ -164,7 +225,9 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, State, U>([...operators, retryOperator]);
     },
 
-    asyncQueue<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U> {
+    asyncQueue<U>(
+      operation: (value: Current, state: State) => Promise<U>
+    ): PipeBuilder<Input, State, U> {
       let queue: Array<{ value: any; next: Function; err: Error | null }> = [];
       let processing = false;
 
@@ -198,8 +261,11 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, State, U>([...operators, queueOperator]);
     },
 
-    asyncLast<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U> {
-      let pending: { value: any; next: Function; err: Error | null } | null = null;
+    asyncLast<U>(
+      operation: (value: Current, state: State) => Promise<U>
+    ): PipeBuilder<Input, State, U> {
+      let pending: { value: any; next: Function; err: Error | null } | null =
+        null;
       let processing = false;
 
       const processLast = async () => {
@@ -231,10 +297,15 @@ function createPipeBuilder<Input, State, Current = Input>(
         processLast();
       };
 
-      return createPipeBuilder<Input, State, U>([...operators, asyncLastOperator]);
+      return createPipeBuilder<Input, State, U>([
+        ...operators,
+        asyncLastOperator,
+      ]);
     },
 
-    asyncFirst<U>(operation: (value: Current, state: State) => Promise<U>): PipeBuilder<Input, State, U> {
+    asyncFirst<U>(
+      operation: (value: Current, state: State) => Promise<U>
+    ): PipeBuilder<Input, State, U> {
       let processing = false;
 
       const firstOperator: Operator<any, any> = (err, value, next) => {
@@ -260,16 +331,23 @@ function createPipeBuilder<Input, State, Current = Input>(
       return createPipeBuilder<Input, State, U>([...operators, firstOperator]);
     },
 
-    catch<U>(operation: (err: Error, state: State) => U): PipeBuilder<Input, State, Current | U> {
+    catch<U>(
+      operation: (err: Error, state: State) => U
+    ): PipeBuilder<Input, State, Current | U> {
       const catchOperator: Operator<any, any> = (err, value, next) => {
         const ctx = (catchOperator as any).context as PipeContext;
         if (err) next(null, operation(err, ctx.currentState));
         else next(null, value);
       };
-      return createPipeBuilder<Input, State, Current | U>([...operators, catchOperator]);
+      return createPipeBuilder<Input, State, Current | U>([
+        ...operators,
+        catchOperator,
+      ]);
     },
 
-    filter(operation: (value: Current, state: State) => boolean): PipeBuilder<Input, State, Current> {
+    filter(
+      operation: (value: Current, state: State) => boolean
+    ): PipeBuilder<Input, State, Current> {
       const filterOperator: Operator<any, any> = (
         err,
         value,
@@ -283,7 +361,10 @@ function createPipeBuilder<Input, State, Current = Input>(
           else complete(null, value);
         }
       };
-      return createPipeBuilder<Input, State, Current>([...operators, filterOperator]);
+      return createPipeBuilder<Input, State, Current>([
+        ...operators,
+        filterOperator,
+      ]);
     },
 
     debounce(ms: number): PipeBuilder<Input, State, Current> {
@@ -306,7 +387,10 @@ function createPipeBuilder<Input, State, Current = Input>(
           next(null, value);
         }, ms);
       };
-      return createPipeBuilder<Input, State, Current>([...operators, debounceOperator]);
+      return createPipeBuilder<Input, State, Current>([
+        ...operators,
+        debounceOperator,
+      ]);
     },
 
     throttle(ms: number): PipeBuilder<Input, State, Current> {
@@ -328,7 +412,10 @@ function createPipeBuilder<Input, State, Current = Input>(
           complete(null, value);
         }
       };
-      return createPipeBuilder<Input, State, Current>([...operators, throttleOperator]);
+      return createPipeBuilder<Input, State, Current>([
+        ...operators,
+        throttleOperator,
+      ]);
     },
 
     delay(ms: number): PipeBuilder<Input, State, Current> {
@@ -339,10 +426,15 @@ function createPipeBuilder<Input, State, Current = Input>(
             next(null, value);
           }, ms);
       };
-      return createPipeBuilder<Input, State, Current>([...operators, delayOperator]);
+      return createPipeBuilder<Input, State, Current>([
+        ...operators,
+        delayOperator,
+      ]);
     },
 
-    setState<NewState = Current>(value?: NewState | ((value: Current) => NewState)): PipeBuilder<Input, NewState, Current> {
+    setState<NewState = Current>(
+      value?: NewState | ((value: Current) => NewState)
+    ): PipeBuilder<Input, NewState, Current> {
       const setOperator: Operator<any, any> = function (err, val, next) {
         if (err) {
           next(err);
@@ -363,10 +455,15 @@ function createPipeBuilder<Input, State, Current = Input>(
           next(null, val);
         }
       };
-      return createPipeBuilder<Input, NewState, Current>([...operators, setOperator]);
+      return createPipeBuilder<Input, NewState, Current>([
+        ...operators,
+        setOperator,
+      ]);
     },
 
-    updateState<NewState = State>(operation: (state: State, value: Current) => NewState): PipeBuilder<Input, NewState, Current> {
+    updateState<NewState = State>(
+      operation: (state: State, value: Current) => NewState
+    ): PipeBuilder<Input, NewState, Current> {
       const updateOperator: Operator<any, any> = function (err, value, next) {
         if (err) {
           next(err);
@@ -382,15 +479,40 @@ function createPipeBuilder<Input, State, Current = Input>(
           next(null, value);
         }
       };
-      return createPipeBuilder<Input, NewState, Current>([...operators, updateOperator]);
+      return createPipeBuilder<Input, NewState, Current>([
+        ...operators,
+        updateOperator,
+      ]);
     },
 
-    use(initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void] {
-      return useWithoutCache<Input, State, Current>(operators, initialValue, subscribe);
+    use(
+      initialValue: State,
+      subscribe?: (
+        run: (value: Input) => void,
+        initialValue: State
+      ) => void | (() => void)
+    ): readonly [State, (value: Input) => void] {
+      return useWithoutCache<Input, State, Current>(
+        operators,
+        initialValue,
+        subscribe
+      );
     },
 
-    useCache(cacheKey: string, initialValue: State, subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)): readonly [State, (value: Input) => void] {
-      return useWithCache<Input, State, Current>(operators, cacheKey, initialValue, subscribe);
+    useCache(
+      cacheKey: string,
+      initialValue: State,
+      subscribe?: (
+        run: (value: Input) => void,
+        initialValue: State
+      ) => void | (() => void)
+    ): readonly [State, (value: Input) => void] {
+      return useWithCache<Input, State, Current>(
+        operators,
+        cacheKey,
+        initialValue,
+        subscribe
+      );
     },
   };
 
@@ -400,7 +522,10 @@ function createPipeBuilder<Input, State, Current = Input>(
 function useWithoutCache<Input, State, Current>(
   operators: Operator<any, any>[],
   initialValue: State,
-  subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)
+  subscribe?: (
+    run: (value: Input) => void,
+    initialValue: State
+  ) => void | (() => void)
 ): readonly [State, (value: Input) => void] {
   const isMountedRef = useRef(true);
   const stateRef = useRef<State>(initialValue);
@@ -417,7 +542,7 @@ function useWithoutCache<Input, State, Current>(
       },
       setState: (value: any) => {
         stateRef.current = value;
-        listenersRef.current.forEach(listener => listener());
+        listenersRef.current.forEach((listener) => listener());
       },
       isMounted: () => isMountedRef.current,
     };
@@ -442,7 +567,11 @@ function useWithoutCache<Input, State, Current>(
     return stateRef.current;
   }, []);
 
-  const state = useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
+  const state = useSyncExternalStore(
+    subscribeToStore,
+    getSnapshot,
+    getSnapshot
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -467,12 +596,15 @@ function useWithCache<Input, State, Current>(
   operators: Operator<any, any>[],
   cacheKey: string,
   initialValue: State,
-  subscribe?: (run: (value: Input) => void, initialValue: State) => void | (() => void)
+  subscribe?: (
+    run: (value: Input) => void,
+    initialValue: State
+  ) => void | (() => void)
 ): readonly [State, (value: Input) => void] {
   const cache = useContext(CacheContext);
 
   if (!cache) {
-    throw new Error('useCache must be used within a CacheProvider');
+    throw new Error("useCache must be used within a CacheProvider");
   }
 
   const isMountedRef = useRef(true);
@@ -502,21 +634,30 @@ function useWithCache<Input, State, Current>(
     runRef.current = run;
   }
 
-  const subscribeToStore = useCallback((listener: () => void) => {
-    return cache.subscribe<State>(cacheKey, listener);
-  }, [cacheKey]);
+  const subscribeToStore = useCallback(
+    (listener: () => void) => {
+      return cache.subscribe<State>(cacheKey, listener);
+    },
+    [cacheKey]
+  );
 
   const getSnapshot = useCallback(() => {
     return cache.get<State>(cacheKey) ?? initialValueRef.current;
   }, [cacheKey]);
 
-  const state = useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
+  const state = useSyncExternalStore(
+    subscribeToStore,
+    getSnapshot,
+    getSnapshot
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
 
     if (subscribe && runRef.current) {
-      cache.addSubscription(cacheKey, () => subscribe(runRef.current!, initialValueRef.current));
+      cache.addSubscription(cacheKey, () =>
+        subscribe(runRef.current!, initialValueRef.current)
+      );
     }
 
     return () => {
@@ -549,7 +690,10 @@ type CacheStore = {
 function createCacheStore(): CacheStore {
   const values = new Map<string, any>();
   const subscribers = new Map<string, Set<Subscriber>>();
-  const subscriptions = new Map<string, { count: number; unsubscribe?: () => void }>();
+  const subscriptions = new Map<
+    string,
+    { count: number; unsubscribe?: () => void }
+  >();
 
   return {
     values,
@@ -564,7 +708,7 @@ function createCacheStore(): CacheStore {
       values.set(key, value);
       const subs = subscribers.get(key);
       if (subs) {
-        subs.forEach(callback => callback(value));
+        subs.forEach((callback) => callback(value));
       }
     },
 
@@ -589,7 +733,7 @@ function createCacheStore(): CacheStore {
       values.delete(key);
       const subs = subscribers.get(key);
       if (subs) {
-        subs.forEach(callback => callback(undefined));
+        subs.forEach((callback) => callback(undefined));
       }
     },
 
@@ -599,7 +743,10 @@ function createCacheStore(): CacheStore {
         existing.count++;
       } else {
         const unsubscribe = subscribe();
-        subscriptions.set(key, { count: 1, unsubscribe: unsubscribe || undefined });
+        subscriptions.set(key, {
+          count: 1,
+          unsubscribe: unsubscribe || undefined,
+        });
       }
     },
 
@@ -619,7 +766,7 @@ function createCacheStore(): CacheStore {
     clear(): void {
       values.clear();
       subscribers.forEach((subs) => {
-        subs.forEach(callback => callback(undefined));
+        subs.forEach((callback) => callback(undefined));
       });
       subscribers.clear();
       subscriptions.forEach((sub) => {
@@ -628,7 +775,7 @@ function createCacheStore(): CacheStore {
         }
       });
       subscriptions.clear();
-    }
+    },
   };
 }
 
@@ -646,14 +793,18 @@ export function CacheProvider({ children }: CacheProviderProps) {
     storeRef.current = createCacheStore();
   }
 
-  return createElement(CacheContext.Provider, { value: storeRef.current }, children);
+  return createElement(
+    CacheContext.Provider,
+    { value: storeRef.current },
+    children
+  );
 }
 
 export function useCache() {
   const cache = useContext(CacheContext);
 
   if (!cache) {
-    throw new Error('useCache must be used within a CacheProvider');
+    throw new Error("useCache must be used within a CacheProvider");
   }
 
   return {
@@ -664,6 +815,10 @@ export function useCache() {
   };
 }
 
-export function pipe<State = unknown, Input = unknown>(): PipeBuilder<Input, State, Input> {
+export function pipe<State = unknown, Input = unknown>(): PipeBuilder<
+  Input,
+  State,
+  Input
+> {
   return createPipeBuilder<Input, State, Input>([]);
 }
