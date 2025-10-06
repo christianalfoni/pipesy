@@ -318,20 +318,20 @@ Subscribe to external data sources like WebSockets:
 function LiveNotifications() {
   const [notifications, addNotification] = pipe()
     .updateState((state, notification) => [...state, notification])
-    .useSubscription((addNotification) => {
-      // Subscribe function
-      const ws = new WebSocket("wss://api.example.com/notifications");
+    .use([]);
 
-      ws.onmessage = (event) => {
-        const notification = JSON.parse(event.data);
-        addNotification(notification);
-      };
+  useEffect(() => {
+    const ws = new WebSocket("wss://api.example.com/notifications");
 
-      // Cleanup function (called on unmount)
-      return () => {
-        ws.close();
-      };
-    }, []); // Initial state
+    ws.onmessage = (event) => {
+      const notification = JSON.parse(event.data);
+      addNotification(notification);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
 
   return (
     <div>
@@ -363,23 +363,17 @@ function App() {
 }
 
 function useCurrentUser() {
-  const [user] pipe()
+  const [user, loadUser] = pipe()
     .setState()
-    .useSubcription(
-      (call) => {
-        fetch(`/api/users/me`)
-          .then((res) => res.json())
-          .then(call);
+    .useCache("current-user", null);
 
-        return () => {
-          // Abort fetch
-        };
-      },
-      null,
-      "current-user"
-    ); // Shared cache key + initial value
+  useEffect(() => {
+    fetch(`/api/users/me`)
+      .then((res) => res.json())
+      .then(loadUser);
+  }, []);
 
-  return user
+  return user;
 }
 
 function UserProfile() {
@@ -544,18 +538,18 @@ Handle errors in the pipeline and provide a recovery value.
 
 ### Termination
 
-#### `.use(initialState)`
+#### `.use(initialValue)`
 
 Returns `[state, dispatch]` tuple - works like `useState`.
 
-- `initialState` - The initial state value for the pipeline
+- `initialValue` - The initial state value for the pipeline
 
-#### `.useCache(key, initialState)`
+#### `.useCache(cacheKey, initialValue)`
 
 Like `.use()` but shares state globally via cache key.
 
-- `key` - Unique cache key to share state across components
-- `initialState` - The initial state value for the pipeline
+- `cacheKey` - Unique cache key to share state across components
+- `initialValue` - The initial state value for the pipeline
 
 ## 🎨 Patterns & Best Practices
 

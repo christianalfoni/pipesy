@@ -75,9 +75,9 @@ type PipeBuilder<Input, State, Current> = {
   delay(ms: number): PipeBuilder<Input, State, Current>;
 
   /** Sets the state to a new value, either directly or using a function of the current value */
-  setState<NewState = State>(
-    value?: NewState | ((value: Current) => NewState)
-  ): PipeBuilder<Input, NewState, Current>;
+  setState(
+    value?: State | ((value: Current) => State)
+  ): PipeBuilder<Input, State, Current>;
 
   /** Updates the state using a function of the current state and value */
   updateState<NewState = State>(
@@ -85,22 +85,12 @@ type PipeBuilder<Input, State, Current> = {
   ): PipeBuilder<Input, NewState, Current>;
 
   /** React hook that returns the current state and a function to trigger the pipe */
-  use(
-    initialValue: State,
-    subscribe?: (
-      run: (value: Input) => void,
-      initialValue: State
-    ) => void | (() => void)
-  ): readonly [State, (value: Input) => void];
+  use(initialValue: State): readonly [State, (value: Input) => void];
 
   /** React hook that shares state globally via cache key */
   useCache(
     cacheKey: string,
-    initialValue: State,
-    subscribe?: (
-      run: (value: Input) => void,
-      initialValue: State
-    ) => void | (() => void)
+    initialValue: State
   ): readonly [State, (value: Input) => void];
 };
 
@@ -432,9 +422,9 @@ function createPipeBuilder<Input, State, Current = Input>(
       ]);
     },
 
-    setState<NewState = Current>(
-      value?: NewState | ((value: Current) => NewState)
-    ): PipeBuilder<Input, NewState, Current> {
+    setState(
+      value?: State | ((value: Current) => State)
+    ): PipeBuilder<Input, State, Current> {
       const setOperator: Operator<any, any> = function (err, val, next) {
         if (err) {
           next(err);
@@ -444,7 +434,7 @@ function createPipeBuilder<Input, State, Current = Input>(
             value === undefined
               ? val
               : typeof value === "function"
-              ? (value as (value: Current) => NewState)(val)
+              ? (value as (value: Current) => State)(val)
               : value;
 
           ctx.currentState = newValue;
@@ -455,7 +445,7 @@ function createPipeBuilder<Input, State, Current = Input>(
           next(null, val);
         }
       };
-      return createPipeBuilder<Input, NewState, Current>([
+      return createPipeBuilder<Input, State, Current>([
         ...operators,
         setOperator,
       ]);
@@ -485,33 +475,18 @@ function createPipeBuilder<Input, State, Current = Input>(
       ]);
     },
 
-    use(
-      initialValue: State,
-      subscribe?: (
-        run: (value: Input) => void,
-        initialValue: State
-      ) => void | (() => void)
-    ): readonly [State, (value: Input) => void] {
-      return useWithoutCache<Input, State, Current>(
-        operators,
-        initialValue,
-        subscribe
-      );
+    use(initialValue: State): readonly [State, (value: Input) => void] {
+      return useWithoutCache<Input, State, Current>(operators, initialValue);
     },
 
     useCache(
       cacheKey: string,
-      initialValue: State,
-      subscribe?: (
-        run: (value: Input) => void,
-        initialValue: State
-      ) => void | (() => void)
+      initialValue: State
     ): readonly [State, (value: Input) => void] {
       return useWithCache<Input, State, Current>(
         operators,
         cacheKey,
-        initialValue,
-        subscribe
+        initialValue
       );
     },
   };
@@ -521,11 +496,7 @@ function createPipeBuilder<Input, State, Current = Input>(
 
 function useWithoutCache<Input, State, Current>(
   operators: Operator<any, any>[],
-  initialValue: State,
-  subscribe?: (
-    run: (value: Input) => void,
-    initialValue: State
-  ) => void | (() => void)
+  initialValue: State
 ): readonly [State, (value: Input) => void] {
   const isMountedRef = useRef(true);
   const stateRef = useRef<State>(initialValue);
@@ -576,16 +547,8 @@ function useWithoutCache<Input, State, Current>(
   useEffect(() => {
     isMountedRef.current = true;
 
-    let unsubscribe: (() => void) | void;
-    if (subscribe && runRef.current) {
-      unsubscribe = subscribe(runRef.current, stateRef.current);
-    }
-
     return () => {
       isMountedRef.current = false;
-      if (unsubscribe) {
-        unsubscribe();
-      }
     };
   }, []);
 
@@ -595,11 +558,7 @@ function useWithoutCache<Input, State, Current>(
 function useWithCache<Input, State, Current>(
   operators: Operator<any, any>[],
   cacheKey: string,
-  initialValue: State,
-  subscribe?: (
-    run: (value: Input) => void,
-    initialValue: State
-  ) => void | (() => void)
+  initialValue: State
 ): readonly [State, (value: Input) => void] {
   const cache = useContext(CacheContext);
 
@@ -654,17 +613,8 @@ function useWithCache<Input, State, Current>(
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (subscribe && runRef.current) {
-      cache.addSubscription(cacheKey, () =>
-        subscribe(runRef.current!, initialValueRef.current)
-      );
-    }
-
     return () => {
       isMountedRef.current = false;
-      if (subscribe) {
-        cache.removeSubscription(cacheKey);
-      }
     };
   }, [cacheKey]);
 
@@ -677,12 +627,9 @@ type Subscriber<T = any> = (value: T) => void;
 type CacheStore = {
   values: Map<string, any>;
   subscribers: Map<string, Set<Subscriber>>;
-  subscriptions: Map<string, { count: number; unsubscribe?: () => void }>;
   get<T = any>(key: string): T | undefined;
   set<T = any>(key: string, value: T): void;
   subscribe<T = any>(key: string, callback: Subscriber<T>): () => void;
-  addSubscription(key: string, subscribe: () => (() => void) | void): void;
-  removeSubscription(key: string): void;
   delete(key: string): void;
   clear(): void;
 };
@@ -690,15 +637,10 @@ type CacheStore = {
 function createCacheStore(): CacheStore {
   const values = new Map<string, any>();
   const subscribers = new Map<string, Set<Subscriber>>();
-  const subscriptions = new Map<
-    string,
-    { count: number; unsubscribe?: () => void }
-  >();
 
   return {
     values,
     subscribers,
-    subscriptions,
 
     get<T = any>(key: string): T | undefined {
       return values.get(key);
@@ -737,44 +679,12 @@ function createCacheStore(): CacheStore {
       }
     },
 
-    addSubscription(key: string, subscribe: () => (() => void) | void): void {
-      const existing = subscriptions.get(key);
-      if (existing) {
-        existing.count++;
-      } else {
-        const unsubscribe = subscribe();
-        subscriptions.set(key, {
-          count: 1,
-          unsubscribe: unsubscribe || undefined,
-        });
-      }
-    },
-
-    removeSubscription(key: string): void {
-      const existing = subscriptions.get(key);
-      if (existing) {
-        existing.count--;
-        if (existing.count === 0) {
-          if (existing.unsubscribe) {
-            existing.unsubscribe();
-          }
-          subscriptions.delete(key);
-        }
-      }
-    },
-
     clear(): void {
       values.clear();
       subscribers.forEach((subs) => {
         subs.forEach((callback) => callback(undefined));
       });
       subscribers.clear();
-      subscriptions.forEach((sub) => {
-        if (sub.unsubscribe) {
-          sub.unsubscribe();
-        }
-      });
-      subscriptions.clear();
     },
   };
 }
