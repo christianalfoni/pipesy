@@ -28,7 +28,7 @@ import { pipe } from "pipesy";
 function Counter() {
   const [count, increment] = pipe()
     .updateState((state, value) => state + value)
-    .useState(0);
+    .use(0);
 
   return <button onClick={() => increment(1)}>Count: {count}</button>;
 }
@@ -47,7 +47,7 @@ function NameInput() {
     .map((value) => value.trim())
     .map((value) => value.toUpperCase())
     .setState()
-    .useState("");
+    .use("");
 
   return (
     <div>
@@ -69,7 +69,7 @@ function AgeInput() {
     .map((value) => parseInt(value))
     .filter((value) => !isNaN(value) && value >= 0 && value <= 120)
     .setState()
-    .useState(0);
+    .use(0);
 
   return (
     <div>
@@ -93,7 +93,7 @@ function SearchBox() {
     .map((value) => value.trim())
     .filter((value) => value.length >= 3)
     .updateState((state, value) => ({ ...state, query: value }))
-    .useState({ input: "", query: "" });
+    .use({ input: "", query: "" });
 
   return (
     <div>
@@ -123,7 +123,7 @@ function UserProfile() {
       return { status: "success", data };
     })
     .setState()
-    .useState({ status: "idle", data: null });
+    .use({ status: "idle", data: null });
 
   return (
     <div>
@@ -156,7 +156,7 @@ function ResilientFetcher() {
       error: error.message,
     }))
     .setState()
-    .useState({ loading: false, data: null, error: null });
+    .use({ loading: false, data: null, error: null });
 
   return (
     <div>
@@ -194,7 +194,7 @@ function ReliableDataFetcher() {
       error: "Failed after 3 retries",
     }))
     .setState()
-    .useState({ loading: false, data: null, error: null });
+    .use({ loading: false, data: null, error: null });
 
   return (
     <div>
@@ -232,7 +232,7 @@ function BatchEmailSender() {
       };
     })
     .setState()
-    .useState({ sent: [], queue: [], total: 0 });
+    .use({ sent: [], queue: [], total: 0 });
 
   return (
     <div>
@@ -270,7 +270,7 @@ function AutocompleteSearch() {
       return await res.json();
     })
     .setState()
-    .useState([]);
+    .use([]);
 
   return (
     <div>
@@ -295,7 +295,7 @@ function MouseTracker() {
     .throttle(100) // Update at most every 100ms
     .map((event) => ({ x: event.clientX, y: event.clientY }));
     .setState()
-    .useState({ x: 0, y: 0 });
+    .use({ x: 0, y: 0 });
 
   useEffect(() => {
     window.addEventListener("mousemove", onMouseMove);
@@ -365,13 +365,11 @@ function App() {
 function useCurrentUser() {
   const [user, loadUser] = pipe()
     .setState()
-    .useCache("current-user", null);
-
-  useEffect(() => {
-    fetch(`/api/users/me`)
-      .then((res) => res.json())
-      .then(loadUser);
-  }, []);
+    .use(null, "current-user", () => {
+      fetch(`/api/users/me`)
+        .then((res) => res.json())
+        .then(loadUser);
+    });
 
   return user;
 }
@@ -538,18 +536,14 @@ Handle errors in the pipeline and provide a recovery value.
 
 ### Termination
 
-#### `.use(initialValue)`
+#### `.use(initialValue, cacheKey?, effect?, deps?)`
 
 Returns `[state, dispatch]` tuple - works like `useState`.
 
 - `initialValue` - The initial state value for the pipeline
-
-#### `.useCache(cacheKey, initialValue)`
-
-Like `.use()` but shares state globally via cache key.
-
-- `cacheKey` - Unique cache key to share state across components
-- `initialValue` - The initial state value for the pipeline
+- `cacheKey` (optional) - Unique cache key to share state globally across components
+- `effect` (optional) - Effect function to run, can return cleanup function
+- `deps` (optional) - Dependency array for the effect (defaults to `[]`)
 
 ## 🎨 Patterns & Best Practices
 
@@ -629,7 +623,7 @@ function Component() {
 
 ## 💡 Why React Pipeline?
 
-**vs useState**: Handles complex async flows, debouncing, retries, and queuing out of the box.
+**vs use**: Handles complex async flows, debouncing, retries, and queuing out of the box.
 
 **vs useReducer**: More composable, better for async, easier to read and reason about.
 

@@ -85,12 +85,11 @@ type PipeBuilder<Input, State, Current> = {
   ): PipeBuilder<Input, NewState, Current>;
 
   /** React hook that returns the current state and a function to trigger the pipe */
-  use(initialValue: State): readonly [State, (value: Input) => void];
-
-  /** React hook that shares state globally via cache key */
-  useCache(
-    cacheKey: string,
-    initialValue: State
+  use(
+    initialValue: State,
+    cacheKey?: string,
+    effect?: () => void | (() => void),
+    deps?: any[]
   ): readonly [State, (value: Input) => void];
 };
 
@@ -105,6 +104,11 @@ function createPipeFunction<T>(
       currentValue: any,
       index: number = 0
     ): void => {
+      // Check if component is still mounted before executing next operator
+      if (context.isMounted && !context.isMounted()) {
+        return;
+      }
+
       if (index >= ops.length) {
         if (err) throw err;
         return;
@@ -116,16 +120,20 @@ function createPipeFunction<T>(
       const operatorWithContext = operator as any;
       operatorWithContext.context = context;
 
-      operator(
-        err,
-        currentValue,
-        (nextErr, nextValue) => {
-          executeOperators(ops, nextErr, nextValue, index + 1);
-        },
-        (completeErr, completeValue) => {
-          // complete callback - stop execution
-        }
-      );
+      try {
+        operator(
+          err,
+          currentValue,
+          (nextErr, nextValue) => {
+            executeOperators(ops, nextErr, nextValue, index + 1);
+          },
+          (completeErr, completeValue) => {
+            // complete callback - stop execution
+          }
+        );
+      } catch (error) {
+        executeOperators(ops, error as Error, currentValue, index + 1);
+      }
     };
 
     executeOperators(operators, null, value, 0);
@@ -475,18 +483,18 @@ function createPipeBuilder<Input, State, Current = Input>(
       ]);
     },
 
-    use(initialValue: State): readonly [State, (value: Input) => void] {
-      return useWithoutCache<Input, State, Current>(operators, initialValue);
-    },
-
-    useCache(
-      cacheKey: string,
-      initialValue: State
+    use(
+      initialValue: State,
+      cacheKey?: string,
+      effect?: () => void | (() => void),
+      deps: any[] = []
     ): readonly [State, (value: Input) => void] {
-      return useWithCache<Input, State, Current>(
+      return usePipe<Input, State, Current>(
         operators,
+        initialValue,
         cacheKey,
-        initialValue
+        effect,
+        deps
       );
     },
   };
@@ -494,95 +502,64 @@ function createPipeBuilder<Input, State, Current = Input>(
   return basePipe as PipeBuilder<Input, State, Current>;
 }
 
-function useWithoutCache<Input, State, Current>(
+// Effect management for cached pipes
+type EffectEntry = {
+  consumerCount: number;
+  cleanup?: (() => void) | void;
+  currentDeps: any[];
+};
+
+const effectCache = new Map<string, EffectEntry>();
+
+function usePipe<Input, State, Current>(
   operators: Operator<any, any>[],
-  initialValue: State
+  initialValue: State,
+  cacheKey?: string,
+  effect?: () => void | (() => void),
+  deps: any[] = []
 ): readonly [State, (value: Input) => void] {
+  const cache = cacheKey ? useContext(CacheContext) : null;
+
+  if (cacheKey && !cache) {
+    throw new Error("Cache key provided but not within a CacheProvider");
+  }
+
   const isMountedRef = useRef(true);
   const stateRef = useRef<State>(initialValue);
   const listenersRef = useRef<Set<() => void>>(new Set());
   const runRef = useRef<(value: Input) => void | undefined>(undefined);
-
-  if (!runRef.current) {
-    const context: PipeContext = {
-      get currentState() {
-        return stateRef.current;
-      },
-      set currentState(value: any) {
-        stateRef.current = value;
-      },
-      setState: (value: any) => {
-        stateRef.current = value;
-        listenersRef.current.forEach((listener) => listener());
-      },
-      isMounted: () => isMountedRef.current,
-    };
-
-    const pipeFn = createPipeFunction<Input>(operators, context);
-
-    const run = (value: Input) => {
-      if (!isMountedRef.current) return;
-      pipeFn(value);
-    };
-    runRef.current = run;
-  }
-
-  const subscribeToStore = useCallback((listener: () => void) => {
-    listenersRef.current.add(listener);
-    return () => {
-      listenersRef.current.delete(listener);
-    };
-  }, []);
-
-  const getSnapshot = useCallback(() => {
-    return stateRef.current;
-  }, []);
-
-  const state = useSyncExternalStore(
-    subscribeToStore,
-    getSnapshot,
-    getSnapshot
+  const effectKeyRef = useRef<string | undefined>(
+    cacheKey && effect ? cacheKey : undefined
   );
 
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  return [state, runRef.current!];
-}
-
-function useWithCache<Input, State, Current>(
-  operators: Operator<any, any>[],
-  cacheKey: string,
-  initialValue: State
-): readonly [State, (value: Input) => void] {
-  const cache = useContext(CacheContext);
-
-  if (!cache) {
-    throw new Error("useCache must be used within a CacheProvider");
-  }
-
-  const isMountedRef = useRef(true);
-  const runRef = useRef<(value: Input) => void | undefined>(undefined);
-  const initialValueRef = useRef<State>(initialValue);
-
+  // Initialize pipe function
   if (!runRef.current) {
-    const context: PipeContext = {
-      get currentState() {
-        return cache.get<State>(cacheKey) ?? initialValueRef.current;
-      },
-      set currentState(value: any) {
-        cache.set(cacheKey, value);
-      },
-      setState: (value: any) => {
-        cache.set(cacheKey, value);
-      },
-      isMounted: () => isMountedRef.current,
-    };
+    const context: PipeContext = cache
+      ? {
+          get currentState() {
+            return cache.get<State>(cacheKey!) ?? initialValue;
+          },
+          set currentState(value: any) {
+            cache.set(cacheKey!, value);
+          },
+          setState: (value: any) => {
+            cache.set(cacheKey!, value);
+          },
+          isMounted: () => isMountedRef.current,
+        }
+      : {
+          get currentState() {
+            return stateRef.current;
+          },
+          set currentState(value: any) {
+            stateRef.current = value;
+          },
+          setState: (value: any) => {
+            stateRef.current = value;
+            listenersRef.current.forEach((listener) => listener());
+          },
+          isMounted: () => isMountedRef.current,
+        };
 
     const pipeFn = createPipeFunction<Input>(operators, context);
 
@@ -593,16 +570,27 @@ function useWithCache<Input, State, Current>(
     runRef.current = run;
   }
 
+  // Set up store subscription
   const subscribeToStore = useCallback(
     (listener: () => void) => {
-      return cache.subscribe<State>(cacheKey, listener);
+      if (cache && cacheKey) {
+        return cache.subscribe<State>(cacheKey, listener);
+      } else {
+        listenersRef.current.add(listener);
+        return () => {
+          listenersRef.current.delete(listener);
+        };
+      }
     },
-    [cacheKey]
+    [cacheKey, cache]
   );
 
   const getSnapshot = useCallback(() => {
-    return cache.get<State>(cacheKey) ?? initialValueRef.current;
-  }, [cacheKey]);
+    if (cache && cacheKey) {
+      return cache.get<State>(cacheKey) ?? initialValue;
+    }
+    return stateRef.current;
+  }, [cacheKey, cache, initialValue]);
 
   const state = useSyncExternalStore(
     subscribeToStore,
@@ -610,13 +598,65 @@ function useWithCache<Input, State, Current>(
     getSnapshot
   );
 
+  // Handle effect lifecycle
   useEffect(() => {
     isMountedRef.current = true;
 
+    const effectKey = effectKeyRef.current;
+
+    if (effectKey && effect) {
+      let entry = effectCache.get(effectKey);
+
+      if (!entry) {
+        // First consumer - initialize and run effect
+        entry = {
+          consumerCount: 1,
+          currentDeps: deps,
+        };
+        effectCache.set(effectKey, entry);
+
+        const cleanup = effect();
+        entry.cleanup = cleanup;
+      } else {
+        // Additional consumer
+        entry.consumerCount++;
+
+        // Check if deps changed
+        const depsChanged =
+          entry.currentDeps.length !== deps.length ||
+          entry.currentDeps.some((dep, i) => dep !== deps[i]);
+
+        if (depsChanged) {
+          // Dispose current effect and restart
+          if (entry.cleanup) {
+            entry.cleanup();
+          }
+          entry.currentDeps = deps;
+          const cleanup = effect();
+          entry.cleanup = cleanup;
+        }
+      }
+    }
+
     return () => {
       isMountedRef.current = false;
+
+      if (effectKey && effect) {
+        const entry = effectCache.get(effectKey);
+        if (entry) {
+          entry.consumerCount--;
+
+          if (entry.consumerCount === 0) {
+            // Last consumer unmounted - cleanup
+            if (entry.cleanup) {
+              entry.cleanup();
+            }
+            effectCache.delete(effectKey);
+          }
+        }
+      }
     };
-  }, [cacheKey]);
+  }, [effectKeyRef.current, ...deps]);
 
   return [state, runRef.current!];
 }
@@ -710,22 +750,8 @@ export function CacheProvider({ children }: CacheProviderProps) {
   );
 }
 
-export function useCache() {
-  const cache = useContext(CacheContext);
 
-  if (!cache) {
-    throw new Error("useCache must be used within a CacheProvider");
-  }
-
-  return {
-    get: <T = any>(key: string): T | undefined => cache.get<T>(key),
-    set: <T = any>(key: string, value: T): void => cache.set<T>(key, value),
-    delete: (key: string): void => cache.delete(key),
-    clear: (): void => cache.clear(),
-  };
-}
-
-export function pipe<State = unknown, Input = unknown>(): PipeBuilder<
+export function pipe<Input = unknown, State = unknown>(): PipeBuilder<
   Input,
   State,
   Input
